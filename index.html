@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plataforma de Educação e Empregabilidade</title>
+    <!--
+      Content Security Policy:
+      - In development Vite uses eval for HMR; allow 'unsafe-eval' only during dev to avoid breaking HMR.
+      - In production, remove 'unsafe-eval' for security.
+    -->
+    <script>
+      (function () {
+        // Avoid using `import.meta` in non-module inline scripts (not supported).
+        // Detect development by checking the location hostname and port used by Vite.
+        var isDev = false;
+        try {
+          var host = window && window.location && window.location.hostname;
+          var port = window && window.location && window.location.port;
+          if (host === 'localhost' || host === '127.0.0.1' || port === '5173') {
+            isDev = true;
+          }
+        } catch (e) { isDev = false; }
+        var meta = document.createElement('meta');
+        meta.httpEquiv = 'Content-Security-Policy';
+        if (isDev) {
+          // Allow unsafe-eval only in development for HMR. Remove before packaging.
+          meta.content = "default-src 'self' 'unsafe-eval' 'unsafe-inline' data: blob: http: https:;";
+        } else {
+          meta.content = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;";
+        }
+        document.getElementsByTagName('head')[0].appendChild(meta);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
