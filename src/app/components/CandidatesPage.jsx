@@ -85,22 +85,37 @@ export function CandidatesPage() {
     setIsLoading(true);
     try {
       const response = await api.getCompanyApplications(user.id);
-      const normalized = (response.applications || []).map((c) => ({
-        ...c,
-        status: c.status || 'pending',
-        createdAt: c.createdAt || c.appliedDate || new Date().toISOString(),
-        cpf: c.cpf || c.document || '',
-        portfolioLinks: c.portfolioLinks || {
-          linkedin: c.linkedin,
-          github: c.github,
-          website: c.website,
-        },
-        certificates: c.certificates || [],
-        academicHistory: c.academicHistory || [],
-        desiredRole: c.desiredRole || c.appliedFor,
-        salaryExpectation: c.salaryExpectation || c.salary || '',
-        yearsExperience: Number.isFinite(c.yearsExperience) ? c.yearsExperience : null,
-      }));
+      const normalized = (response.applications || []).map((c) => {
+        const data = c.candidateData || {};
+        const portfolioLinks = data.portfolioLinks || c.portfolioLinks || {
+          linkedin: data.linkedin || c.linkedin,
+          github: data.github || c.github,
+          website: data.website || c.website,
+        };
+
+        return {
+          ...c,
+          ...data,
+          name: data.name || c.name || 'Candidato',
+          email: data.email || c.email || '',
+          resumeUrl: data.resumeUrl || c.resumeUrl || '',
+          resumeFileName: data.resumeFileName || c.resumeFileName || '',
+          status: c.status || 'pending',
+          createdAt: c.createdAt || c.appliedDate || new Date().toISOString(),
+          cpf: data.cpf || c.cpf || c.document || '',
+          portfolioLinks,
+          certificates: data.certificates || c.certificates || [],
+          academicHistory: data.academicHistory || c.academicHistory || [],
+          desiredRole: data.desiredRole || c.desiredRole || c.appliedFor || '',
+          salaryExpectation: data.salaryExpectation || c.salaryExpectation || c.salary || '',
+          yearsExperience: Number.isFinite(data.yearsExperience)
+            ? data.yearsExperience
+            : Number.isFinite(c.yearsExperience)
+              ? c.yearsExperience
+              : null,
+          skills: data.skills || c.skills || [],
+        };
+      });
       setCandidates(normalized);
     } catch (error) {
       console.error('Erro ao carregar candidatos:', error);
@@ -604,7 +619,7 @@ export function CandidatesPage() {
                               <div className="space-y-2">
                                 <h3 className="font-semibold">Competências</h3>
                                 <div className="flex flex-wrap gap-2">
-                                  {selectedCandidate.skills.map((skill, idx) => (
+                                  {(selectedCandidate.skills || []).map((skill, idx) => (
                                     <Badge key={idx} variant="secondary">{skill}</Badge>
                                   ))}
                                 </div>

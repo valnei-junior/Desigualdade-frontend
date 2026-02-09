@@ -165,6 +165,9 @@ export const uploadResume = async (file, userId) => {
 
   const response = await fetch(`${API_BASE_URL}/upload-resume`, {
     method: 'POST',
+    headers: {
+      'x-filename': file?.name || 'curriculum.pdf',
+    },
     // No auth header for local backend; content-type is set automatically for FormData
     body: formData,
   });
