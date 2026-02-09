@@ -628,7 +628,7 @@ export function Dashboard() {
                 </div>
                 <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Novo</Badge>
               </div>
-              <Link to="/vagas">
+              <Link to="/candidatos">
                 <Button variant="ghost" size="sm" className="h-8 text-xs">
                   Ver candidatos →
                 </Button>
@@ -719,7 +719,7 @@ export function Dashboard() {
                 Gerenciar vagas
               </Button>
             </Link>
-            <Link to="/empresas">
+            <Link to="/candidatos">
               <Button size="sm" variant="outline" className="gap-2">
                 <Users className="h-4 w-4" />
                 Ver candidatos
