@@ -1,0 +1,1264 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
+import { Button } from '@/app/components/ui/button';
+import { Progress } from '@/app/components/ui/progress';
+import { Badge } from '@/app/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
+import { useUser } from '@/app/contexts/UserContext';
+import { ROLES } from '@/app/constants/roles';
+import { mockTimeline, mockAlerts } from '@/app/data/mockData';
+import {
+  BookOpen,
+  Briefcase,
+  Target,
+  Bell,
+  Award,
+  TrendingUp,
+  Users,
+  DollarSign,
+  BarChart3,
+  AlertTriangle,
+  ClipboardList,
+  MessageSquare,
+  CheckCircle2,
+  Calendar,
+  FileText,
+  Clock,
+  UserCheck,
+  Mail,
+  Plus,
+  ExternalLink,
+  Info
+} from 'lucide-react';
+
+export function Dashboard() {
+  const { user } = useUser();
+
+  const [openCourseDialog, setOpenCourseDialog] = useState(false);
+  const [openJobDialog, setOpenJobDialog] = useState(false);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [lessonIndex, setLessonIndex] = useState(0);
+  const [lessonCompleted, setLessonCompleted] = useState(false);
+
+  if (!user) return null;
+
+  const currentStage = mockTimeline.find(t => t.status === 'in-progress');
+  const isCourseProvider = user?.role === ROLES.COURSE_PROVIDER;
+  const isCompany = user?.role === ROLES.COMPANY;
+  const enrolledCourses = Array.isArray(user?.enrolledCourses) ? user.enrolledCourses : [];
+  const rawJobApplications = Array.isArray(user?.jobApplications) ? user.jobApplications : [];
+  const [jobApplications, setJobApplications] = useState(rawJobApplications);
+
+  // Sincroniza candidaturas sempre que mudam no usuário ou ao abrir o modal (garante dados mais recentes do localStorage)
+  useEffect(() => {
+    setJobApplications(rawJobApplications);
+  }, [rawJobApplications]);
+
+  useEffect(() => {
+    if (!openJobDialog || typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem('currentUser');
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed?.jobApplications)) {
+        setJobApplications(parsed.jobApplications);
+        if (!selectedJobId && parsed.jobApplications.length) {
+          setSelectedJobId(parsed.jobApplications[0].id);
+        }
+      }
+    } catch (err) {
+      console.warn('Não foi possível ler candidaturas do storage', err);
+    }
+  }, [openJobDialog, selectedJobId]);
+
+  const selectedJob = jobApplications.find((j: any) => j.id === selectedJobId) || jobApplications[0];
+
+  const activeCourse = enrolledCourses[0];
+  const activeJob = jobApplications[0];
+
+  const selectedCourse = enrolledCourses.find((c: any) => c.id === selectedCourseId) || activeCourse;
+  const lessons = (selectedCourse?.lessons && selectedCourse.lessons.length)
+    ? selectedCourse.lessons
+    : [
+        { id: 'l1', title: 'Introdução', duration: '08:30' },
+        { id: 'l2', title: 'Módulo 1 · Conceitos', duration: '12:10' },
+        { id: 'l3', title: 'Módulo 2 · Prática', duration: '15:45' },
+      ];
+  const currentLesson = lessons[Math.min(lessonIndex, lessons.length - 1)];
+
+  const storagePrefix = user?.id ? `course_provider_${user.id}` : 'course_provider';
+  const providerData = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return { courses: [], students: [], assessments: [], payments: [], messages: [], contentItems: [] };
+    }
+
+    const read = (suffix: string, fallback: any) => {
+      const raw = localStorage.getItem(`${storagePrefix}_${suffix}`);
+      try {
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    };
+
+    return {
+      courses: read('courses', []),
+      students: read('students', []),
+      assessments: read('assessments', []),
+      payments: read('payments', []),
+      messages: read('messages', []),
+      contentItems: read('content', []),
+      teachers: read('teachers', []),
+      classes: read('classes', []),
+      payroll: read('payroll', [])
+    };
+  }, [storagePrefix]);
+
+  if (isCourseProvider) {
+    const { courses, students, assessments, payments, messages, contentItems, teachers, classes, payroll } = providerData;
+    const now = new Date();
+
+    const totalStudents = students.length;
+    const certifiedStudents = students.filter((s: any) => s.certificateIssued).length;
+    const activeCourses = courses.filter((c: any) => {
+      if (!c.endDate) return true;
+      const end = new Date(c.endDate);
+      if (Number.isNaN(end.getTime())) return true;
+      return end >= now;
+    }).length;
+
+    const newStudentsToday = students.filter((s: any) => {
+      if (!s.createdAt) return false;
+      const d = new Date(s.createdAt);
+      return d.toDateString() === now.toDateString();
+    }).length;
+
+    const newStudentsMonth = students.filter((s: any) => {
+      if (!s.createdAt) return false;
+      const d = new Date(s.createdAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }).length;
+
+    const revenue = payments
+      .filter((p: any) => p.status === 'paid')
+      .reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0);
+
+    const payrollTotal = payroll.reduce((acc: number, p: any) => acc + Number(p.salary || 0), 0);
+    const paidStudents = payments.filter((p: any) => p.status === 'paid').length;
+    const overdueStudents = payments.filter((p: any) => p.status !== 'paid').length;
+
+    const averageProgress = students.length
+      ? Math.round(students.reduce((acc: number, s: any) => acc + Number(s.progress || 0), 0) / students.length)
+      : 0;
+
+    const monthlyEnrollments = (() => {
+      const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      const counts = new Array(12).fill(0);
+      students.forEach((s: any) => {
+        if (!s.createdAt) return;
+        const d = new Date(s.createdAt);
+        if (Number.isNaN(d.getTime())) return;
+        counts[d.getMonth()] += 1;
+      });
+      const total = counts.reduce((acc, v) => acc + v, 0);
+      if (total === 0) {
+        return months.slice(0, 6).map((m, idx) => ({ label: m, value: [6, 10, 8, 12, 9, 14][idx] }));
+      }
+      return months.slice(0, 6).map((m, idx) => ({ label: m, value: counts[idx] }));
+    })();
+
+    const courseEnrollment = courses.map((c: any) => {
+      const count = students.filter((s: any) => s.courseId === c.id).length;
+      return { id: c.id, title: c.title, count };
+    }).sort((a: any, b: any) => b.count - a.count);
+
+    const lowProgressStudents = students.filter((s: any) => Number(s.progress || 0) < 30).slice(0, 5);
+    const nearCompletionStudents = students.filter((s: any) => Number(s.progress || 0) >= 80).slice(0, 5);
+    const latestStudents = [...students].sort((a: any, b: any) => {
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return db - da;
+    }).slice(0, 5);
+
+    const activeStudents = students.filter((s: any) => Number(s.progress || 0) > 0).length;
+    const inactiveStudents = Math.max(0, students.length - activeStudents);
+
+    const pendingAssessments = assessments.filter((a: any) => !(a.grades && a.grades.length)).length;
+    const allGrades = assessments.flatMap((a: any) => (a.grades || []).map((g: any) => Number(g.grade || 0))).filter((g: number) => !Number.isNaN(g));
+    const averageGrade = allGrades.length ? Math.round(allGrades.reduce((acc, v) => acc + v, 0) / allGrades.length) : 0;
+    const approvalRate = allGrades.length ? Math.round((allGrades.filter((g: number) => g >= 70).length / allGrades.length) * 100) : 0;
+
+    const certificatesPending = Math.max(0, students.length - certifiedStudents);
+
+    const unansweredMessages = messages.filter((m: any) => !m.responded).length;
+    const recentMessages = [...messages].slice(0, 3);
+
+    const coursesEndingSoon = courses.filter((c: any) => {
+      if (!c.endDate) return false;
+      const end = new Date(c.endDate);
+      if (Number.isNaN(end.getTime())) return false;
+      const diffDays = (end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+      return diffDays >= 0 && diffDays <= 7;
+    }).length;
+
+    const pendingPayments = payments.filter((p: any) => p.status !== 'paid').length;
+    const contentUpdates = contentItems.filter((c: any) => c.releaseRule === 'date' && !c.releaseValue).length;
+
+    const maxMonthly = Math.max(...monthlyEnrollments.map((m: any) => m.value), 1);
+    const maxCourse = Math.max(...courseEnrollment.map((c: any) => c.count), 1);
+
+    return (
+      <div className="space-y-4 md:space-y-6">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold">Dashboard — Empresa de Cursos</h1>
+          <p className="text-sm md:text-base text-muted-foreground">Visão geral da operação</p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          <Card className="bg-gradient-to-br from-blue-50/60 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total de alunos</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalStudents}</div>
+              <p className="text-xs text-muted-foreground">{newStudentsMonth} novos no mês</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-emerald-50/60 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Cursos ativos</CardTitle>
+              <BookOpen className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{activeCourses}</div>
+              <p className="text-xs text-muted-foreground">{courses.length} cursos cadastrados</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-violet-50/60 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Novos alunos</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{newStudentsToday}</div>
+              <p className="text-xs text-muted-foreground">Hoje · {newStudentsMonth} no mês</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-amber-50/60 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Alunos certificados</CardTitle>
+              <Award className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{certifiedStudents}</div>
+              <p className="text-xs text-muted-foreground">{certificatesPending} pendentes</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+          <Card className="bg-gradient-to-br from-slate-50/70 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Turmas</CardTitle>
+              <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{classes.length}</div>
+              <p className="text-xs text-muted-foreground">Turmas ativas e planejadas</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-cyan-50/70 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Professores</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{teachers.length}</div>
+              <p className="text-xs text-muted-foreground">Equipe docente cadastrada</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-green-50/70 to-background">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Faturamento</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">R$ {revenue.toFixed(2)}</div>
+              <p className="text-xs text-muted-foreground">Pagamentos confirmados</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
+          <Card className="bg-gradient-to-br from-sky-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Gráficos</CardTitle>
+              <CardDescription>Visão rápida das tendências</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm font-medium mb-2">Inscrições por mês</p>
+                <div className="space-y-2">
+                  {monthlyEnrollments.map((item: any) => (
+                    <div key={item.label} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{item.label}</span>
+                        <span>{item.value}</span>
+                      </div>
+                      <Progress value={(item.value / maxMonthly) * 100} className="h-2" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Cursos mais procurados</p>
+                <div className="space-y-2">
+                  {courseEnrollment.slice(0, 4).map((item: any) => (
+                    <div key={item.id} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span className="truncate max-w-[70%]">{item.title}</span>
+                        <span>{item.count}</span>
+                      </div>
+                      <Progress value={(item.count / maxCourse) * 100} className="h-2" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-indigo-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Taxas & Atividade</CardTitle>
+              <CardDescription>Conclusão e engajamento</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm font-medium mb-2">Taxa de conclusão</p>
+                <div className="flex items-center gap-3">
+                  <Progress value={averageProgress} className="h-2 flex-1" />
+                  <span className="text-sm text-muted-foreground">{averageProgress}%</span>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Alunos ativos vs. inativos</p>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Ativos</span>
+                    <span>{activeStudents}</span>
+                  </div>
+                  <Progress value={students.length ? (activeStudents / students.length) * 100 : 0} className="h-2" />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Inativos</span>
+                    <span>{inactiveStudents}</span>
+                  </div>
+                  <Progress value={students.length ? (inactiveStudents / students.length) * 100 : 0} className="h-2" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
+          <Card className="bg-gradient-to-br from-slate-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Atividade dos alunos</CardTitle>
+              <CardDescription>Últimos inscritos e alertas</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <p className="text-sm font-medium mb-2">Últimos alunos inscritos</p>
+                <div className="space-y-2">
+                  {latestStudents.map((s: any) => (
+                    <div key={s.id} className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate max-w-[60%]">{s.name || 'Aluno'}</span>
+                      <span>{s.courseId ? courses.find((c: any) => c.id === s.courseId)?.title || 'Curso' : 'Curso'}</span>
+                    </div>
+                  ))}
+                  {!latestStudents.length && <p className="text-xs text-muted-foreground">Sem inscrições recentes.</p>}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Progresso baixo</p>
+                <div className="space-y-2">
+                  {lowProgressStudents.map((s: any) => (
+                    <div key={s.id} className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate max-w-[60%]">{s.name || 'Aluno'}</span>
+                      <span>{s.progress || 0}%</span>
+                    </div>
+                  ))}
+                  {!lowProgressStudents.length && <p className="text-xs text-muted-foreground">Nenhum alerta.</p>}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Próximos de concluir</p>
+                <div className="space-y-2">
+                  {nearCompletionStudents.map((s: any) => (
+                    <div key={s.id} className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate max-w-[60%]">{s.name || 'Aluno'}</span>
+                      <span>{s.progress || 0}%</span>
+                    </div>
+                  ))}
+                  {!nearCompletionStudents.length && <p className="text-xs text-muted-foreground">Nenhum aluno perto da conclusão.</p>}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-amber-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Status dos cursos</CardTitle>
+              <CardDescription>Adesão e atenção</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <p className="text-sm font-medium mb-2">Cursos ativos</p>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Em andamento</span>
+                  <span>{activeCourses}</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-2">Cursos com mais alunos</p>
+                <div className="space-y-2">
+                  {courseEnrollment.slice(0, 3).map((c: any) => (
+                    <div key={c.id} className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate max-w-[70%]">{c.title}</span>
+                      <span>{c.count}</span>
+                    </div>
+                  ))}
+                  {!courseEnrollment.length && <p className="text-xs text-muted-foreground">Nenhum curso cadastrado.</p>}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-2">Baixa adesão</p>
+                <div className="space-y-2">
+                  {courseEnrollment.filter((c: any) => c.count < 3).slice(0, 3).map((c: any) => (
+                    <div key={c.id} className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate max-w-[70%]">{c.title}</span>
+                      <span className="flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> {c.count}</span>
+                    </div>
+                  ))}
+                  {!courseEnrollment.filter((c: any) => c.count < 3).length && <p className="text-xs text-muted-foreground">Nenhum curso em alerta.</p>}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-emerald-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Avaliações</CardTitle>
+              <CardDescription>Notas e correções</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Média geral</span>
+                <span>{averageGrade} pts</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Pendentes de correção</span>
+                <span>{pendingAssessments}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Taxa de aprovação</span>
+                <span>{approvalRate}%</span>
+              </div>
+              <Progress value={approvalRate} className="h-2" />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
+          <Card className="bg-gradient-to-br from-rose-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Certificados</CardTitle>
+              <CardDescription>Status de emissão</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Emitidos</span>
+                <span>{certifiedStudents}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Pendentes</span>
+                <span>{certificatesPending}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-blue-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Comunicação</CardTitle>
+              <CardDescription>Mensagens recentes</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Mensagens não respondidas</span>
+                <span>{unansweredMessages}</span>
+              </div>
+              <div className="space-y-1">
+                {recentMessages.map((m: any) => (
+                  <div key={m.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <MessageSquare className="h-3 w-3" />
+                    <span className="truncate">{m.title}</span>
+                  </div>
+                ))}
+                {!recentMessages.length && <p className="text-xs text-muted-foreground">Nenhum aviso enviado.</p>}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-yellow-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Alertas e lembretes</CardTitle>
+              <CardDescription>Ações pendentes</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Cursos próximos do encerramento</span>
+                <span>{coursesEndingSoon}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Pagamentos pendentes</span>
+                <span>{pendingPayments}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Atualizações no conteúdo</span>
+                <span>{contentUpdates}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-green-50/60 to-background">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Financeiro</CardTitle>
+              <CardDescription>Salários e situação dos alunos</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Salários (total)</span>
+                <span>R$ {payrollTotal.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Alunos em dia</span>
+                <span>{paidStudents}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Alunos atrasados</span>
+                <span>{overdueStudents}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="bg-gradient-to-br from-slate-50/60 to-background">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Ações rápidas</CardTitle>
+            <CardDescription>Atalhos para tarefas do dia</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Link to="/cursos">
+              <Button size="sm" className="gap-2"><BookOpen className="h-4 w-4" />Criar novo curso</Button>
+            </Link>
+            <Link to="/cursos">
+              <Button size="sm" variant="outline" className="gap-2"><Users className="h-4 w-4" />Cadastrar aluno</Button>
+            </Link>
+            <Link to="/financeiro">
+              <Button size="sm" variant="outline" className="gap-2"><DollarSign className="h-4 w-4" />Financeiro</Button>
+            </Link>
+            <Link to="/cursos">
+              <Button size="sm" variant="outline" className="gap-2"><MessageSquare className="h-4 w-4" />Enviar comunicado</Button>
+            </Link>
+            <Link to="/cursos">
+              <Button size="sm" variant="outline" className="gap-2"><CheckCircle2 className="h-4 w-4" />Emitir certificado</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Dashboard específico para COMPANY (Empresas de Recrutamento)
+  if (isCompany) {
+    // Dados simulados para demonstração
+    const newResumes = 12;
+    const scheduledInterviews = 5;
+    const upcomingDeadlines = 3;
+    const pendingMessages = 8;
+
+    return (
+      <div className="space-y-4 md:space-y-6">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold">Dashboard — {user.companyName || user.name}</h1>
+          <p className="text-sm md:text-base text-muted-foreground">Gestão de vagas e candidatos</p>
+        </div>
+
+        {/* Cards Principais */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          <Link to="/candidatos" className="block">
+            <Card className="bg-gradient-to-br from-blue-50/60 to-background transition hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Novos Currículos</CardTitle>
+                <FileText className="h-4 w-4 text-blue-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{newResumes}</div>
+                <p className="text-xs text-muted-foreground">Recebidos esta semana</p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link to="/vagas" className="block">
+            <Card className="bg-gradient-to-br from-emerald-50/60 to-background transition hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Entrevistas Agendadas</CardTitle>
+                <UserCheck className="h-4 w-4 text-emerald-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{scheduledInterviews}</div>
+                <p className="text-xs text-muted-foreground">Próximos 7 dias</p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link to="/vagas" className="block">
+            <Card className="bg-gradient-to-br from-amber-50/60 to-background transition hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Prazos Próximos</CardTitle>
+                <Clock className="h-4 w-4 text-amber-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{upcomingDeadlines}</div>
+                <p className="text-xs text-muted-foreground">Vagas vencendo em breve</p>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link to="/vagas" className="block">
+            <Card className="bg-gradient-to-br from-violet-50/60 to-background transition hover:shadow-md">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Mensagens Pendentes</CardTitle>
+                <Mail className="h-4 w-4 text-violet-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{pendingMessages}</div>
+                <p className="text-xs text-muted-foreground">Não respondidas</p>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
+
+        {/* Alertas e Notificações */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
+              <Bell className="h-4 w-4 md:h-5 md:w-5" />
+              Alertas e Notificações
+            </CardTitle>
+            <CardDescription className="text-xs md:text-sm">
+              Acompanhamento de atividades importantes
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Novos Currículos Recebidos */}
+            <div className="space-y-3 pb-4 border-b">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-600 shrink-0">
+                    <FileText className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Novos currículos recebidos</p>
+                    <p className="text-xs text-muted-foreground">12 candidatos se inscreveram para suas vagas</p>
+                  </div>
+                </div>
+                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Novo</Badge>
+              </div>
+              <Link to="/candidatos">
+                <Button variant="ghost" size="sm" className="h-8 text-xs">
+                  Ver candidatos →
+                </Button>
+              </Link>
+            </div>
+
+            {/* Entrevistas Agendadas */}
+            <div className="space-y-3 pb-4 border-b">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 shrink-0">
+                    <UserCheck className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Entrevistas agendadas</p>
+                    <p className="text-xs text-muted-foreground">5 entrevistas confirmadas para a próxima semana</p>
+                  </div>
+                </div>
+                <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Calendário</Badge>
+              </div>
+              <Link to="/vagas">
+                <Button variant="ghost" size="sm" className="h-8 text-xs">
+                  Gerenciar calendário →
+                </Button>
+              </Link>
+            </div>
+
+            {/* Prazos Próximos */}
+            <div className="space-y-3 pb-4 border-b">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-600 shrink-0">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Prazos próximos</p>
+                    <p className="text-xs text-muted-foreground">3 vagas com prazo de encerramento em breve</p>
+                  </div>
+                </div>
+                <Badge variant="destructive" className="bg-amber-100 text-amber-700 hover:bg-amber-100">Urgente</Badge>
+              </div>
+              <Link to="/vagas">
+                <Button variant="ghost" size="sm" className="h-8 text-xs">
+                  Renovar vagas →
+                </Button>
+              </Link>
+            </div>
+
+            {/* Mensagens Pendentes */}
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 text-violet-600 shrink-0">
+                    <Mail className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Mensagens pendentes</p>
+                    <p className="text-xs text-muted-foreground">8 candidatos aguardam sua resposta</p>
+                  </div>
+                </div>
+                <Badge className="bg-violet-100 text-violet-700 hover:bg-violet-100">Chat</Badge>
+              </div>
+              <Link to="/vagas">
+                <Button variant="ghost" size="sm" className="h-8 text-xs">
+                  Responder mensagens →
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Ações Rápidas */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Ações Rápidas</CardTitle>
+            <CardDescription className="text-xs">Acesso direto às funcionalidades principais</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Link to="/vagas">
+              <Button size="sm" className="gap-2">
+                <Plus className="h-4 w-4" />
+                Criar nova vaga
+              </Button>
+            </Link>
+            <Link to="/vagas">
+              <Button size="sm" variant="outline" className="gap-2">
+                <Briefcase className="h-4 w-4" />
+                Gerenciar vagas
+              </Button>
+            </Link>
+            <Link to="/candidatos">
+              <Button size="sm" variant="outline" className="gap-2">
+                <Users className="h-4 w-4" />
+                Ver candidatos
+              </Button>
+            </Link>
+            <Link to="/metricas">
+              <Button size="sm" variant="outline" className="gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Métricas
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+
+  return (
+    <div className="space-y-4 md:space-y-6">
+      <div>
+        <h1 className="text-2xl md:text-3xl font-bold">Olá, {user.name}! 👋</h1>
+        <p className="text-sm md:text-base text-muted-foreground">Veja seu progresso na jornada</p>
+      </div>
+
+      {/* Trilha: Curso → Estágio → Emprego */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg md:text-xl">Sua Trilha de Carreira</CardTitle>
+          <CardDescription className="text-xs md:text-sm">Curso → Estágio → Emprego</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 md:space-y-4">
+            {mockTimeline.map((item, idx) => (
+              <div key={item.id} className="flex items-center gap-3 md:gap-4">
+                <div className={`flex h-8 w-8 md:h-10 md:w-10 items-center justify-center rounded-full shrink-0 ${
+                  item.status === 'completed' ? 'bg-green-100 text-green-600' :
+                  item.status === 'in-progress' ? 'bg-blue-100 text-blue-600' :
+                  'bg-gray-100 text-gray-400'
+                }`}>
+                  {idx === 0 ? <BookOpen className="h-4 w-4 md:h-5 md:w-5" /> :
+                   idx === 1 ? <Briefcase className="h-4 w-4 md:h-5 md:w-5" /> :
+                   <Target className="h-4 w-4 md:h-5 md:w-5" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm md:text-base truncate">{item.title}</p>
+                      <p className="text-xs md:text-sm text-muted-foreground">{item.date}</p>
+                    </div>
+                    <Badge variant={
+                      item.status === 'completed' ? 'default' :
+                      item.status === 'in-progress' ? 'secondary' :
+                      'outline'
+                    } className="text-xs shrink-0">
+                      {item.status === 'completed' ? 'Concluído' :
+                       item.status === 'in-progress' ? 'Em andamento' :
+                       'Pendente'}
+                    </Badge>
+                  </div>
+                  <Progress value={item.progress} className="mt-2 h-2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Últimas inscrições (curso e vaga) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+        <Card className="bg-gradient-to-br from-sky-50/70 to-background">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div>
+              <CardTitle className="text-sm font-medium">Curso inscrito</CardTitle>
+              <CardDescription className="text-xs">Seu último curso</CardDescription>
+            </div>
+            <BookOpen className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {activeCourse ? (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{activeCourse.title}</p>
+                    <p className="text-xs text-muted-foreground">{activeCourse.area}</p>
+                  </div>
+                  <Badge variant="secondary" className="text-[11px]">
+                    {activeCourse.status || 'Inscrição enviada'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Início: {activeCourse.startDate || 'a confirmar'}</span>
+                  <span>Progresso: {activeCourse.progress ?? 0}%</span>
+                </div>
+                <Button variant="outline" size="sm" className="w-full h-9 text-xs md:text-sm" onClick={() => setOpenCourseDialog(true)}>
+                  <Info className="h-3 w-3 mr-2" /> Ver detalhes
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">Nenhum curso inscrito ainda.</p>
+                <Link to="/cursos">
+                  <Button size="sm" className="w-full h-9 text-xs md:text-sm">
+                    <ExternalLink className="h-3 w-3 mr-2" /> Encontrar cursos
+                  </Button>
+                </Link>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-amber-50/70 to-background">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div>
+              <CardTitle className="text-sm font-medium">Vaga em andamento</CardTitle>
+              <CardDescription className="text-xs">Última candidatura</CardDescription>
+            </div>
+            <Briefcase className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {activeJob ? (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{activeJob.title}</p>
+                    <p className="text-xs text-muted-foreground">{activeJob.company}</p>
+                  </div>
+                  <Badge variant="secondary" className="text-[11px]">
+                    {activeJob.status || 'Candidatura enviada'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{activeJob.location || 'Local não informado'}</span>
+                  <span>Tipo: {activeJob.type || '—'}</span>
+                </div>
+                <Button variant="outline" size="sm" className="w-full h-9 text-xs md:text-sm" onClick={() => setOpenJobDialog(true)}>
+                  <Info className="h-3 w-3 mr-2" /> Ver andamento
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">Nenhuma candidatura enviada ainda.</p>
+                <Link to="/vagas">
+                  <Button size="sm" className="w-full h-9 text-xs md:text-sm">
+                    <ExternalLink className="h-3 w-3 mr-2" /> Buscar vagas
+                  </Button>
+                </Link>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Status da Candidatura */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Cursos Concluídos
+            </CardTitle>
+            <BookOpen className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{user.completedCourses?.length || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              +1 este mês
+            </p>
+            <Link to="/cursos">
+              <Button variant="link" className="px-0 mt-2 h-auto text-xs md:text-sm">
+                Ver cursos disponíveis →
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Candidaturas Enviadas
+            </CardTitle>
+            <Briefcase className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{user.appliedJobs?.length || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              2 aguardando resposta
+            </p>
+            <Link to="/vagas">
+              <Button variant="link" className="px-0 mt-2 h-auto text-xs md:text-sm">
+                Ver vagas compatíveis →
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card className="sm:col-span-2 lg:col-span-1">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Pontos de Gamificação
+            </CardTitle>
+            <Award className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{user.points || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {user.badges?.length || 0} badges conquistados
+            </p>
+            <Link to="/gamificacao">
+              <Button variant="link" className="px-0 mt-2 h-auto text-xs md:text-sm">
+                Ver conquistas →
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Alertas Recentes */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg md:text-xl">Alertas Recentes</CardTitle>
+            <Link to="/alertas">
+              <Button variant="outline" size="sm" className="h-8 text-xs md:text-sm">
+                <Bell className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+                Ver todos
+              </Button>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 md:space-y-4">
+            {mockAlerts.slice(0, 3).map((alert) => (
+              <div key={alert.id} className="flex items-start gap-3 md:gap-4 p-3 md:p-4 rounded-lg border">
+                <div className={`flex h-2 w-2 rounded-full mt-2 shrink-0 ${
+                  alert.read ? 'bg-gray-300' : 'bg-blue-500'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm md:text-base">{alert.title}</p>
+                  <p className="text-xs md:text-sm text-muted-foreground">{alert.message}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{alert.date}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Indicador de Chance de Contratação */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
+            <TrendingUp className="h-4 w-4 md:h-5 md:w-5" />
+            Chance de Contratação
+          </CardTitle>
+          <CardDescription className="text-xs md:text-sm">
+            Baseado em seu perfil e histórico
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 md:space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs md:text-sm font-medium">Perfil completo</span>
+                <span className="text-xs md:text-sm text-muted-foreground">85%</span>
+              </div>
+              <Progress value={85} className="h-2" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs md:text-sm font-medium">Cursos relevantes</span>
+                <span className="text-xs md:text-sm text-muted-foreground">70%</span>
+              </div>
+              <Progress value={70} className="h-2" />
+            </div>
+            <div className="pt-3 md:pt-4 border-t">
+              <p className="text-xs md:text-sm text-muted-foreground">
+                Complete mais cursos e atualize seu perfil para aumentar suas chances!
+              </p>
+              <Link to="/perfil">
+                <Button variant="link" className="px-0 mt-2 h-auto text-xs md:text-sm">
+                  Ir para perfil →
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Modais de detalhe */}
+      <Dialog open={openCourseDialog} onOpenChange={(open) => {
+        setOpenCourseDialog(open);
+        if (open && enrolledCourses.length && !selectedCourseId) {
+          setSelectedCourseId(enrolledCourses[0].id);
+          setLessonIndex(0);
+          setLessonCompleted(false);
+        }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Detalhes do curso inscrito</DialogTitle>
+            <DialogDescription>Veja o status da sua matrícula e próximos passos.</DialogDescription>
+          </DialogHeader>
+          {enrolledCourses.length ? (
+            <div className="space-y-4 text-sm max-h-[72vh] overflow-y-auto pr-1">
+              {/* Cabeçalho do curso */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground">Curso selecionado</span>
+                    <span className="font-semibold text-base truncate">{selectedCourse?.title || 'Selecione um curso'}</span>
+                  </div>
+                  <Badge variant="secondary">{selectedCourse?.status || 'Inscrição enviada'}</Badge>
+                </div>
+                <div>
+                  <Progress value={selectedCourse?.progress ?? 0} className="h-2" />
+                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                    <span>{selectedCourse?.area || 'Área'}</span>
+                    <span>{selectedCourse?.progress ?? 0}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Layout EAD */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                {/* Sidebar de módulos/aulas */}
+                <div className="md:col-span-1 border rounded-md p-2 space-y-2">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Módulos e aulas</p>
+                  <div className="space-y-2">
+                    {lessons.map((lesson: any, idx: number) => (
+                      <button
+                        key={lesson.id || idx}
+                        className={`w-full text-left text-xs p-2 rounded-md border ${idx === lessonIndex ? 'bg-primary/10 border-primary' : 'border-border'}`}
+                        onClick={() => {
+                          setLessonIndex(idx);
+                          setLessonCompleted(false);
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{lesson.title}</span>
+                          <span className="text-[11px] text-muted-foreground">{lesson.duration}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Área principal */}
+                <div className="md:col-span-3 space-y-3">
+                  <div className="aspect-video w-full bg-muted rounded-md flex items-center justify-center text-muted-foreground text-sm border">
+                    Player de vídeo (aula: {currentLesson?.title || '—'})
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" disabled={lessonIndex === 0} onClick={() => { setLessonIndex(Math.max(0, lessonIndex - 1)); setLessonCompleted(false); }}>Aula anterior</Button>
+                    <Button size="sm" variant="outline" disabled={lessonIndex >= lessons.length - 1} onClick={() => { setLessonIndex(Math.min(lessons.length - 1, lessonIndex + 1)); setLessonCompleted(false); }}>Próxima aula</Button>
+                    <Button size="sm" onClick={() => setLessonCompleted(true)}>
+                      {lessonCompleted ? 'Marcada como concluída' : 'Marcar concluída'}
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="border rounded-md p-3 space-y-2">
+                      <p className="text-sm font-semibold flex items-center gap-2">Materiais</p>
+                      <ul className="text-xs text-muted-foreground space-y-1">
+                        <li>• Slides da aula</li>
+                        <li>• PDF de apoio</li>
+                        <li>• Exercícios práticos</li>
+                      </ul>
+                    </div>
+                    <div className="border rounded-md p-3 space-y-2">
+                      <p className="text-sm font-semibold flex items-center gap-2">Comentários</p>
+                      <p className="text-xs text-muted-foreground">Deixe dúvidas ou anotações sobre esta aula.</p>
+                      <Button size="sm" variant="outline">Adicionar comentário</Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de cursos para trocar seleção */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Seus cursos</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {enrolledCourses.map((course: any) => (
+                    <button
+                      key={course.id}
+                      className={`text-left border rounded-md p-2 text-xs ${selectedCourse?.id === course.id ? 'border-primary bg-primary/5' : 'border-border'}`}
+                      onClick={() => {
+                        setSelectedCourseId(course.id);
+                        setLessonIndex(0);
+                        setLessonCompleted(false);
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm truncate">{course.title}</span>
+                        <Badge variant="secondary">{course.progress ?? 0}%</Badge>
+                      </div>
+                      <p className="text-muted-foreground mt-1">{course.area || 'Área'}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <Link to="/cursos">
+                <Button variant="outline" className="w-full">
+                  <ExternalLink className="h-4 w-4 mr-2" /> Ver cursos
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nenhum curso selecionado.</p>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openJobDialog} onOpenChange={(open) => { setOpenJobDialog(open); if (!open) { setSelectedJobId(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Detalhes da candidatura</DialogTitle>
+            <DialogDescription>Acompanhe em que pé está sua vaga.</DialogDescription>
+          </DialogHeader>
+          {selectedJob ? (
+            <div className="space-y-3 text-sm max-h-80 overflow-y-auto pr-1">
+              <div className="border rounded-md p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{selectedJob.title}</span>
+                  <Badge variant="secondary">{selectedJob.status || 'Candidatura enviada'}</Badge>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Empresa</span>
+                  <span>{selectedJob.company || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Local</span>
+                  <span>{selectedJob.location || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Tipo</span>
+                  <span>{selectedJob.type || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Compatibilidade</span>
+                  <span>{selectedJob.match ? `${selectedJob.match}%` : '—'}</span>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Faixa salarial</span>
+                  <span>{selectedJob.salary || 'A combinar'}</span>
+                </div>
+              </div>
+
+              {jobApplications.length > 1 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Outras candidaturas</p>
+                  <div className="grid gap-2 max-h-40 overflow-y-auto pr-1">
+                    {jobApplications.filter((j: any) => j.id !== selectedJob.id).map((job: any) => (
+                      <button
+                        key={job.id}
+                        className="w-full text-left border rounded-md p-2 text-xs hover:border-primary"
+                        onClick={() => setSelectedJobId(job.id)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold truncate">{job.title}</span>
+                          <Badge variant="outline" className="text-[10px]">{job.status || 'Enviada'}</Badge>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground truncate">{job.company || '—'}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Link to="/vagas">
+                <Button variant="outline" className="w-full">
+                  <ExternalLink className="h-4 w-4 mr-2" /> Ver vagas
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nenhuma candidatura encontrada.</p>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
